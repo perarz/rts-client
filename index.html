@@ -47,6 +47,9 @@
             border-radius: 50%;
             margin-right: 6px;
         }
+        .waiting-overlay {
+            background: rgba(0, 0, 0, 0.7);
+        }
     </style>
 </head>
 <body class="bg-gray-900">
@@ -83,6 +86,16 @@
         </div>
     </div>
 
+    <!-- Waiting overlay -->
+    <div id="waitingOverlay" class="hidden fixed inset-0 flex items-center justify-center z-40 waiting-overlay">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-2xl text-center">
+            <h2 class="text-3xl font-bold text-white mb-4">⏳ Czekam na graczy...</h2>
+            <p class="text-gray-300 mb-4">Gra rozpocznie się gdy dołączy minimum 2 graczy</p>
+            <div class="animate-pulse text-6xl">👥</div>
+            <p class="text-gray-400 mt-4 text-sm" id="playerCountText">Gracze: 1/4</p>
+        </div>
+    </div>
+
     <!-- UI Gry -->
     <div id="gameUI" class="hidden">
         <div class="fixed top-0 left-0 right-0 ui-panel text-white p-4 z-10">
@@ -101,6 +114,9 @@
                     </div>
                 </div>
                 <div class="flex gap-2">
+                    <button id="upgradeWorkers" class="btn-produce bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-semibold text-sm" title="Upgrade: +Speed, +HP, +Capacity">
+                        ⚡ Upgrade (?)
+                    </button>
                     <button id="produceWorker" class="btn-produce bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold">
                         👷 Robotnik (100💰)
                     </button>
@@ -130,10 +146,9 @@
 
     <script>
         // ============================================
-        // MULTIPLAYER CLIENT
+        // MULTIPLAYER CLIENT v2.0
         // ============================================
         
-        // Konfiguracja
         const CANVAS_WIDTH = 1600;
         const CANVAS_HEIGHT = 900;
         
@@ -143,37 +158,34 @@
         canvas.width = CANVAS_WIDTH;
         canvas.height = CANVAS_HEIGHT;
 
-        // WebSocket
         let ws = null;
         let myClientId = null;
         let myTeamId = null;
         let myPlayerName = '';
 
-        // Kolory drużyn
         const TEAM_COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b'];
 
-        // Stan gry (synchronizowany z serwerem)
         const gameState = {
-            units: new Map(),      // Map<unitId, unit>
-            buildings: new Map(),  // Map<buildingId, building>
-            players: new Map(),    // Map<clientId, playerInfo>
+            units: new Map(),
+            buildings: new Map(),
+            players: new Map(),
             goldMines: [],
             selectedUnit: null,
+            gameStarted: false,
             
-            // Interpolacja
             prevSnapshot: null,
             nextSnapshot: null,
             snapshotTime: 0,
             interpolationFactor: 0
         };
 
-        // UI Elements
         const joinModal = document.getElementById('joinModal');
         const joinButton = document.getElementById('joinButton');
         const joinStatus = document.getElementById('joinStatus');
         const playerNameInput = document.getElementById('playerName');
         const serverUrlInput = document.getElementById('serverUrl');
         const gameUI = document.getElementById('gameUI');
+        const waitingOverlay = document.getElementById('waitingOverlay');
 
         // ============================================
         // WEBSOCKET CONNECTION
@@ -274,7 +286,6 @@
                     break;
 
                 case 'pong':
-                    // Ping-pong dla latency check
                     break;
             }
         }
@@ -284,22 +295,29 @@
         // ============================================
         
         function handleSnapshot(snapshot) {
-            // Zapisz poprzedni snapshot
             gameState.prevSnapshot = gameState.nextSnapshot;
             gameState.nextSnapshot = snapshot;
             gameState.snapshotTime = Date.now();
             gameState.interpolationFactor = 0;
+            
+            gameState.gameStarted = snapshot.gameStarted;
 
-            // Aktualizuj jednostki
+            // Show/hide waiting overlay
+            if (!gameState.gameStarted) {
+                waitingOverlay.classList.remove('hidden');
+                const playerCount = snapshot.players.length;
+                document.getElementById('playerCountText').textContent = `Gracze: ${playerCount}/4`;
+            } else {
+                waitingOverlay.classList.add('hidden');
+            }
+
             const newUnits = new Map();
             snapshot.units.forEach(unitData => {
                 const existing = gameState.units.get(unitData.id);
                 if (existing) {
-                    // Interpolacja - zachowaj poprzednią pozycję
                     unitData.prevX = existing.x;
                     unitData.prevY = existing.y;
                 } else {
-                    // Nowa jednostka
                     unitData.prevX = unitData.x;
                     unitData.prevY = unitData.y;
                 }
@@ -307,26 +325,22 @@
             });
             gameState.units = newUnits;
 
-            // Aktualizuj budynki
             const newBuildings = new Map();
             snapshot.buildings.forEach(buildingData => {
                 newBuildings.set(buildingData.id, buildingData);
             });
             gameState.buildings = newBuildings;
 
-            // Aktualizuj graczy
             const newPlayers = new Map();
             snapshot.players.forEach(playerData => {
                 newPlayers.set(playerData.clientId, playerData);
             });
             gameState.players = newPlayers;
 
-            // Kopalnie (statyczne)
             if (snapshot.goldMines && snapshot.goldMines.length > 0) {
                 gameState.goldMines = snapshot.goldMines;
             }
 
-            // Aktualizuj UI
             updateUI();
         }
 
@@ -338,16 +352,28 @@
                 case 'player_left':
                     updateStatus(`${event.name} opuścił grę`);
                     break;
+                case 'game_started':
+                    updateStatus(event.message);
+                    break;
+                case 'game_paused':
+                    updateStatus(event.message);
+                    break;
                 case 'unit_produced':
                     if (event.teamId === myTeamId) {
                         updateStatus(`Wyprodukowano ${event.unitType === 'worker' ? 'robotnika 👷' : 'rycerza ⚔️'}`);
+                    }
+                    break;
+                case 'worker_upgraded':
+                    if (event.teamId === myTeamId) {
+                        updateStatus(`⚡ Robotnicy zostali ulepszeni!`);
+                    } else {
+                        updateStatus(`⚡ ${event.playerName} ulepszył robotników`);
                     }
                     break;
                 case 'base_destroyed':
                     updateStatus(`💀 Baza gracza ${event.playerName} została zniszczona!`);
                     break;
                 case 'unit_died':
-                    // Jednostka zginęła
                     break;
             }
         }
@@ -378,20 +404,30 @@
             const myPlayer = gameState.players.get(myClientId);
             if (!myPlayer) return;
 
-            // Złoto
             document.getElementById('goldDisplay').textContent = myPlayer.gold;
-            document.getElementById('produceWorker').disabled = myPlayer.gold < 100;
-            document.getElementById('produceKnight').disabled = myPlayer.gold < 200;
-
-            // Liczba jednostek
+            
             const myUnits = Array.from(gameState.units.values()).filter(u => u.teamId === myTeamId);
             const workers = myUnits.filter(u => u.type === 'worker').length;
             const knights = myUnits.filter(u => u.type === 'knight').length;
             
+            // Update upgrade button
+            const upgradeCost = 400 + (workers * 100);
+            const upgradeBtn = document.getElementById('upgradeWorkers');
+            upgradeBtn.textContent = `⚡ Upgrade (${upgradeCost}💰)`;
+            upgradeBtn.disabled = myPlayer.gold < upgradeCost || myPlayer.workerUpgraded;
+            
+            if (myPlayer.workerUpgraded) {
+                upgradeBtn.textContent = '⚡ Upgraded ✓';
+                upgradeBtn.classList.remove('bg-purple-600', 'hover:bg-purple-700');
+                upgradeBtn.classList.add('bg-green-600');
+            }
+            
+            document.getElementById('produceWorker').disabled = myPlayer.gold < 100;
+            document.getElementById('produceKnight').disabled = myPlayer.gold < 200;
+            
             document.getElementById('workerCount').textContent = workers;
             document.getElementById('knightCount').textContent = knights;
 
-            // Lista graczy
             updatePlayersList();
         }
 
@@ -406,11 +442,13 @@
                 const base = gameState.buildings.get(`base-player-${player.clientId}`);
                 const isAlive = base && base.health > 0;
                 
+                const upgradeIcon = player.workerUpgraded ? ' ⚡' : '';
+                
                 div.innerHTML = `
                     <div class="flex items-center">
                         <span class="team-indicator" style="background: ${TEAM_COLORS[player.teamId]}"></span>
                         <span class="${player.clientId === myClientId ? 'font-bold' : ''} ${!isAlive ? 'line-through opacity-50' : ''}">
-                            ${player.name}
+                            ${player.name}${upgradeIcon}
                         </span>
                     </div>
                     <span class="text-yellow-400">${player.gold}💰</span>
@@ -438,13 +476,16 @@
             }
         }
 
-        // Produkcja
         document.getElementById('produceWorker').addEventListener('click', () => {
             sendCommand('produce', { unitType: 'worker' });
         });
 
         document.getElementById('produceKnight').addEventListener('click', () => {
             sendCommand('produce', { unitType: 'knight' });
+        });
+
+        document.getElementById('upgradeWorkers').addEventListener('click', () => {
+            sendCommand('upgrade_workers', {});
         });
 
         // ============================================
@@ -456,7 +497,6 @@
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // Sprawdź kliknięcie na jednostkę
             let clickedUnit = null;
             gameState.units.forEach(unit => {
                 if (unit.teamId === myTeamId && distance(unit.x, unit.y, x, y) < unit.size + 5) {
@@ -464,7 +504,6 @@
                 }
             });
 
-            // Sprawdź kliknięcie na kopalnię
             let clickedMine = null;
             gameState.goldMines.forEach(mine => {
                 if (distance(mine.x, mine.y, x, y) < mine.size / 2 + 5) {
@@ -473,7 +512,6 @@
             });
 
             if (clickedUnit) {
-                // Wybierz jednostkę
                 if (gameState.selectedUnit) {
                     gameState.selectedUnit.selected = false;
                 }
@@ -481,14 +519,12 @@
                 clickedUnit.selected = true;
                 updateStatus(`Wybrano ${clickedUnit.type === 'worker' ? 'robotnika 👷' : 'rycerza ⚔️'}`);
             } else if (clickedMine && gameState.selectedUnit && gameState.selectedUnit.type === 'worker') {
-                // Wyślij robotnika do kopalni
                 sendCommand('mine', {
                     unitId: gameState.selectedUnit.id,
                     mineId: clickedMine.id
                 });
                 updateStatus('👷 Robotnik idzie do kopalni 💰');
             } else if (gameState.selectedUnit) {
-                // Przesuń jednostkę
                 sendCommand('move', {
                     unitId: gameState.selectedUnit.id,
                     x,
@@ -509,11 +545,10 @@
         function draw() {
             ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-            // Interpolacja (smooth movement)
             const timeSinceSnapshot = Date.now() - gameState.snapshotTime;
-            gameState.interpolationFactor = Math.min(timeSinceSnapshot / 100, 1); // 100ms interpolation window
+            gameState.interpolationFactor = Math.min(timeSinceSnapshot / 100, 1);
 
-            // Rysuj kopalnie
+            // Draw mines
             gameState.goldMines.forEach(mine => {
                 ctx.fillStyle = '#fbbf24';
                 ctx.beginPath();
@@ -530,7 +565,7 @@
                 ctx.fillText('💰', mine.x, mine.y);
             });
 
-            // Rysuj budynki (bazy)
+            // Draw buildings
             gameState.buildings.forEach(building => {
                 const color = TEAM_COLORS[building.teamId];
                 
@@ -540,7 +575,6 @@
                 ctx.lineWidth = 3;
                 ctx.strokeRect(building.x - building.size/2, building.y - building.size/2, building.size, building.size);
 
-                // Dach
                 ctx.fillStyle = '#8b4513';
                 ctx.beginPath();
                 ctx.moveTo(building.x, building.y - building.size/2 - 15);
@@ -550,7 +584,6 @@
                 ctx.fill();
                 ctx.stroke();
 
-                // HP bar
                 const barWidth = building.size;
                 const barHeight = 6;
                 const hpPercent = building.health / building.maxHealth;
@@ -561,16 +594,14 @@
                 ctx.fillRect(building.x - barWidth/2, building.y - building.size/2 - 25, barWidth * hpPercent, barHeight);
             });
 
-            // Rysuj jednostki z interpolacją
+            // Draw units
             gameState.units.forEach(unit => {
-                // Interpolacja pozycji
                 const displayX = unit.prevX + (unit.x - unit.prevX) * gameState.interpolationFactor;
                 const displayY = unit.prevY + (unit.y - unit.prevY) * gameState.interpolationFactor;
 
                 const color = TEAM_COLORS[unit.teamId];
 
                 if (unit.type === 'worker') {
-                    // Worker
                     ctx.fillStyle = color;
                     ctx.beginPath();
                     ctx.arc(displayX, displayY, unit.size, 0, Math.PI * 2);
@@ -579,19 +610,35 @@
                     ctx.lineWidth = 2;
                     ctx.stroke();
 
+                    // Upgraded workers have glow
+                    if (unit.upgraded) {
+                        ctx.strokeStyle = '#fbbf24';
+                        ctx.lineWidth = 3;
+                        ctx.stroke();
+                    }
+
                     ctx.fillStyle = '#fff';
                     ctx.font = 'bold 16px Arial';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText('👷', displayX, displayY);
+                    ctx.fillText(unit.upgraded ? '👷⚡' : '👷', displayX, displayY);
 
                     if (unit.carryingGold > 0) {
                         ctx.fillStyle = '#fbbf24';
                         ctx.font = 'bold 12px Arial';
                         ctx.fillText(`${unit.carryingGold}💰`, displayX, displayY - 25);
                     }
+
+                    // HP bar for workers
+                    const wBarWidth = 40;
+                    const wBarHeight = 3;
+                    const wHpPercent = unit.health / unit.maxHealth;
+                    
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(displayX - wBarWidth/2, displayY - unit.size - 8, wBarWidth, wBarHeight);
+                    ctx.fillStyle = wHpPercent > 0.5 ? '#10b981' : wHpPercent > 0.25 ? '#f59e0b' : '#ef4444';
+                    ctx.fillRect(displayX - wBarWidth/2, displayY - unit.size - 8, wBarWidth * wHpPercent, wBarHeight);
                 } else if (unit.type === 'knight') {
-                    // Knight
                     ctx.fillStyle = color;
                     ctx.beginPath();
                     ctx.moveTo(displayX, displayY - unit.size);
@@ -609,7 +656,6 @@
                     ctx.textBaseline = 'middle';
                     ctx.fillText('⚔️', displayX, displayY);
 
-                    // HP bar
                     const barWidth = 40;
                     const barHeight = 4;
                     const hpPercent = unit.health / unit.maxHealth;
@@ -620,7 +666,6 @@
                     ctx.fillRect(displayX - barWidth/2, displayY - unit.size - 10, barWidth * hpPercent, barHeight);
                 }
 
-                // Zaznaczenie
                 if (unit.selected && unit.teamId === myTeamId) {
                     ctx.strokeStyle = '#fbbf24';
                     ctx.lineWidth = 3;
@@ -633,11 +678,7 @@
             requestAnimationFrame(draw);
         }
 
-        // Start rendering
         draw();
     </script>
 </body>
-
 </html>
-
-
