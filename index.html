@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta http-equiv="Content-Security-Policy"
+      content="connect-src 'self' wss://rts-server-zt9x.onrender.com;">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTS Multiplayer - 4 Graczy</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #gameCanvas {
+            display: block;
+            background: linear-gradient(135deg, #1a5f3e 0%, #2d7a52 100%);
+            cursor: crosshair;
+        }
+        .ui-panel {
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+        }
+        .btn-produce {
+            transition: all 0.2s;
+        }
+        .btn-produce:hover:not(:disabled) {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .btn-produce:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #joinModal {
+            background: rgba(0, 0, 0, 0.9);
+        }
+        .team-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <!-- Modal dołączania -->
+    <div id="joinModal" class="fixed inset-0 flex items-center justify-center z-50">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-2xl max-w-md w-full">
+            <h1 class="text-3xl font-bold text-white mb-6 text-center">🎮 RTS Multiplayer</h1>
+            <p class="text-gray-300 mb-4 text-center">Gra 1v1v1v1 - Maksymalnie 4 graczy</p>
+            
+            <input 
+                type="text" 
+                id="playerName" 
+                placeholder="Twoja nazwa (opcjonalnie)" 
+                maxlength="20"
+                class="w-full px-4 py-3 bg-gray-700 text-white rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+            
+            <input 
+                type="text" 
+                id="serverUrl" 
+                placeholder="wss://rts-server-zt9x.onrender.com" 
+                value="wss://rts-server-zt9x.onrender.com"
+                class="w-full px-4 py-3 bg-gray-700 text-white rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+            
+            <button 
+                id="joinButton" 
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition"
+            >
+                Dołącz do gry 🚀
+            </button>
+            
+            <div id="joinStatus" class="mt-4 text-center text-sm"></div>
+        </div>
+    </div>
+
+    <!-- UI Gry -->
+    <div id="gameUI" class="hidden">
+        <div class="fixed top-0 left-0 right-0 ui-panel text-white p-4 z-10">
+            <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center gap-6">
+                    <div class="text-xl font-bold">
+                        <span class="team-indicator" id="myTeamColor"></span>
+                        <span id="myPlayerName">Gracz</span>
+                    </div>
+                    <div class="text-2xl font-bold">
+                        💰 <span id="goldDisplay">500</span>
+                    </div>
+                    <div class="text-sm opacity-75">
+                        👷 <span id="workerCount">1</span> | 
+                        ⚔️ <span id="knightCount">0</span>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button id="produceWorker" class="btn-produce bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold">
+                        👷 Robotnik (100💰)
+                    </button>
+                    <button id="produceKnight" class="btn-produce bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg font-semibold">
+                        ⚔️ Rycerz (200💰)
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lista graczy -->
+        <div class="fixed top-20 right-4 ui-panel text-white p-4 z-10 rounded-lg" style="min-width: 200px;">
+            <h3 class="text-sm font-bold mb-2 opacity-75">👥 GRACZE</h3>
+            <div id="playersList" class="text-sm space-y-1"></div>
+        </div>
+
+        <div class="fixed bottom-0 left-0 right-0 ui-panel text-white p-3 z-10">
+            <div class="max-w-7xl mx-auto">
+                <div id="statusLog" class="text-sm opacity-90 h-6 overflow-hidden">
+                    Witaj w grze RTS Multiplayer!
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // ============================================
+        // MULTIPLAYER CLIENT
+        // ============================================
+        
+        // Konfiguracja
+        const CANVAS_WIDTH = 1600;
+        const CANVAS_HEIGHT = 900;
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+
+        // WebSocket
+        let ws = null;
+        let myClientId = null;
+        let myTeamId = null;
+        let myPlayerName = '';
+
+        // Kolory drużyn
+        const TEAM_COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b'];
+
+        // Stan gry (synchronizowany z serwerem)
+        const gameState = {
+            units: new Map(),      // Map<unitId, unit>
+            buildings: new Map(),  // Map<buildingId, building>
+            players: new Map(),    // Map<clientId, playerInfo>
+            goldMines: [],
+            selectedUnit: null,
+            
+            // Interpolacja
+            prevSnapshot: null,
+            nextSnapshot: null,
+            snapshotTime: 0,
+            interpolationFactor: 0
+        };
+
+        // UI Elements
+        const joinModal = document.getElementById('joinModal');
+        const joinButton = document.getElementById('joinButton');
+        const joinStatus = document.getElementById('joinStatus');
+        const playerNameInput = document.getElementById('playerName');
+        const serverUrlInput = document.getElementById('serverUrl');
+        const gameUI = document.getElementById('gameUI');
+
+        // ============================================
+        // WEBSOCKET CONNECTION
+        // ============================================
+        
+        function connect() {
+            const serverUrl = serverUrlInput.value.trim();
+            const playerName = playerNameInput.value.trim() || undefined;
+            
+            joinStatus.textContent = '🔄 Łączenie...';
+            joinStatus.className = 'mt-4 text-center text-sm text-yellow-400';
+            joinButton.disabled = true;
+
+            ws = new WebSocket(serverUrl);
+
+            ws.onopen = () => {
+                console.log('✅ Połączono z serwerem');
+                ws.send(JSON.stringify({
+                    type: 'join',
+                    name: playerName
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleServerMessage(message);
+            };
+
+            ws.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+                joinStatus.textContent = '❌ Błąd połączenia';
+                joinStatus.className = 'mt-4 text-center text-sm text-red-400';
+                joinButton.disabled = false;
+            };
+
+            ws.onclose = () => {
+                console.log('🔌 Rozłączono z serwerem');
+                if (myClientId) {
+                    updateStatus('🔌 Rozłączono z serwerem');
+                    setTimeout(() => {
+                        location.reload();
+                    }, 3000);
+                } else {
+                    joinStatus.textContent = '🔌 Rozłączono';
+                    joinStatus.className = 'mt-4 text-center text-sm text-red-400';
+                    joinButton.disabled = false;
+                }
+            };
+        }
+
+        joinButton.addEventListener('click', connect);
+        
+        playerNameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') connect();
+        });
+
+        // ============================================
+        // SERVER MESSAGE HANDLER
+        // ============================================
+        
+        function handleServerMessage(message) {
+            switch (message.type) {
+                case 'joined':
+                    myClientId = message.clientId;
+                    myTeamId = message.teamId;
+                    myPlayerName = message.name;
+                    
+                    joinModal.classList.add('hidden');
+                    gameUI.classList.remove('hidden');
+                    
+                    document.getElementById('myPlayerName').textContent = myPlayerName;
+                    document.getElementById('myTeamColor').style.backgroundColor = TEAM_COLORS[myTeamId];
+                    
+                    updateStatus(`Dołączyłeś jako ${myPlayerName} (Team ${myTeamId + 1})`);
+                    console.log(`✅ Dołączono: ${myPlayerName}, Team ${myTeamId + 1}`);
+                    break;
+
+                case 'room_full':
+                    joinStatus.textContent = message.message;
+                    joinStatus.className = 'mt-4 text-center text-sm text-red-400';
+                    joinButton.disabled = false;
+                    break;
+
+                case 'snapshot':
+                    handleSnapshot(message);
+                    break;
+
+                case 'event':
+                    handleEvent(message);
+                    break;
+
+                case 'game_over':
+                    handleGameOver(message);
+                    break;
+
+                case 'game_reset':
+                    updateStatus(message.message);
+                    break;
+
+                case 'pong':
+                    // Ping-pong dla latency check
+                    break;
+            }
+        }
+
+        // ============================================
+        // SNAPSHOT HANDLING & INTERPOLATION
+        // ============================================
+        
+        function handleSnapshot(snapshot) {
+            // Zapisz poprzedni snapshot
+            gameState.prevSnapshot = gameState.nextSnapshot;
+            gameState.nextSnapshot = snapshot;
+            gameState.snapshotTime = Date.now();
+            gameState.interpolationFactor = 0;
+
+            // Aktualizuj jednostki
+            const newUnits = new Map();
+            snapshot.units.forEach(unitData => {
+                const existing = gameState.units.get(unitData.id);
+                if (existing) {
+                    // Interpolacja - zachowaj poprzednią pozycję
+                    unitData.prevX = existing.x;
+                    unitData.prevY = existing.y;
+                } else {
+                    // Nowa jednostka
+                    unitData.prevX = unitData.x;
+                    unitData.prevY = unitData.y;
+                }
+                newUnits.set(unitData.id, unitData);
+            });
+            gameState.units = newUnits;
+
+            // Aktualizuj budynki
+            const newBuildings = new Map();
+            snapshot.buildings.forEach(buildingData => {
+                newBuildings.set(buildingData.id, buildingData);
+            });
+            gameState.buildings = newBuildings;
+
+            // Aktualizuj graczy
+            const newPlayers = new Map();
+            snapshot.players.forEach(playerData => {
+                newPlayers.set(playerData.clientId, playerData);
+            });
+            gameState.players = newPlayers;
+
+            // Kopalnie (statyczne)
+            if (snapshot.goldMines && snapshot.goldMines.length > 0) {
+                gameState.goldMines = snapshot.goldMines;
+            }
+
+            // Aktualizuj UI
+            updateUI();
+        }
+
+        function handleEvent(event) {
+            switch (event.event) {
+                case 'player_joined':
+                    updateStatus(`${event.name} dołączył do gry! (Team ${event.teamId + 1})`);
+                    break;
+                case 'player_left':
+                    updateStatus(`${event.name} opuścił grę`);
+                    break;
+                case 'unit_produced':
+                    if (event.teamId === myTeamId) {
+                        updateStatus(`Wyprodukowano ${event.unitType === 'worker' ? 'robotnika 👷' : 'rycerza ⚔️'}`);
+                    }
+                    break;
+                case 'base_destroyed':
+                    updateStatus(`💀 Baza gracza ${event.playerName} została zniszczona!`);
+                    break;
+                case 'unit_died':
+                    // Jednostka zginęła
+                    break;
+            }
+        }
+
+        function handleGameOver(message) {
+            const overlay = document.createElement('div');
+            overlay.className = 'fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50';
+            overlay.innerHTML = `
+                <div class="bg-gray-800 p-12 rounded-lg shadow-2xl text-center max-w-lg">
+                    <h1 class="text-5xl font-bold text-white mb-4">${message.message}</h1>
+                    ${message.winner ? `<p class="text-2xl text-yellow-400 mb-6">👑 ${message.winner}</p>` : ''}
+                    <p class="text-gray-300 mb-6">Gra zostanie zresetowana za 5 sekund...</p>
+                    <div class="animate-pulse text-6xl">🏆</div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            setTimeout(() => {
+                overlay.remove();
+            }, 5000);
+        }
+
+        // ============================================
+        // UI UPDATES
+        // ============================================
+        
+        function updateUI() {
+            const myPlayer = gameState.players.get(myClientId);
+            if (!myPlayer) return;
+
+            // Złoto
+            document.getElementById('goldDisplay').textContent = myPlayer.gold;
+            document.getElementById('produceWorker').disabled = myPlayer.gold < 100;
+            document.getElementById('produceKnight').disabled = myPlayer.gold < 200;
+
+            // Liczba jednostek
+            const myUnits = Array.from(gameState.units.values()).filter(u => u.teamId === myTeamId);
+            const workers = myUnits.filter(u => u.type === 'worker').length;
+            const knights = myUnits.filter(u => u.type === 'knight').length;
+            
+            document.getElementById('workerCount').textContent = workers;
+            document.getElementById('knightCount').textContent = knights;
+
+            // Lista graczy
+            updatePlayersList();
+        }
+
+        function updatePlayersList() {
+            const playersList = document.getElementById('playersList');
+            playersList.innerHTML = '';
+
+            gameState.players.forEach(player => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center justify-between';
+                
+                const base = gameState.buildings.get(`base-player-${player.clientId}`);
+                const isAlive = base && base.health > 0;
+                
+                div.innerHTML = `
+                    <div class="flex items-center">
+                        <span class="team-indicator" style="background: ${TEAM_COLORS[player.teamId]}"></span>
+                        <span class="${player.clientId === myClientId ? 'font-bold' : ''} ${!isAlive ? 'line-through opacity-50' : ''}">
+                            ${player.name}
+                        </span>
+                    </div>
+                    <span class="text-yellow-400">${player.gold}💰</span>
+                `;
+                
+                playersList.appendChild(div);
+            });
+        }
+
+        function updateStatus(message) {
+            document.getElementById('statusLog').textContent = message;
+        }
+
+        // ============================================
+        // COMMAND SENDING
+        // ============================================
+        
+        function sendCommand(command, payload) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'command',
+                    command,
+                    payload
+                }));
+            }
+        }
+
+        // Produkcja
+        document.getElementById('produceWorker').addEventListener('click', () => {
+            sendCommand('produce', { unitType: 'worker' });
+        });
+
+        document.getElementById('produceKnight').addEventListener('click', () => {
+            sendCommand('produce', { unitType: 'knight' });
+        });
+
+        // ============================================
+        // CANVAS INTERACTIONS
+        // ============================================
+        
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Sprawdź kliknięcie na jednostkę
+            let clickedUnit = null;
+            gameState.units.forEach(unit => {
+                if (unit.teamId === myTeamId && distance(unit.x, unit.y, x, y) < unit.size + 5) {
+                    clickedUnit = unit;
+                }
+            });
+
+            // Sprawdź kliknięcie na kopalnię
+            let clickedMine = null;
+            gameState.goldMines.forEach(mine => {
+                if (distance(mine.x, mine.y, x, y) < mine.size / 2 + 5) {
+                    clickedMine = mine;
+                }
+            });
+
+            if (clickedUnit) {
+                // Wybierz jednostkę
+                if (gameState.selectedUnit) {
+                    gameState.selectedUnit.selected = false;
+                }
+                gameState.selectedUnit = clickedUnit;
+                clickedUnit.selected = true;
+                updateStatus(`Wybrano ${clickedUnit.type === 'worker' ? 'robotnika 👷' : 'rycerza ⚔️'}`);
+            } else if (clickedMine && gameState.selectedUnit && gameState.selectedUnit.type === 'worker') {
+                // Wyślij robotnika do kopalni
+                sendCommand('mine', {
+                    unitId: gameState.selectedUnit.id,
+                    mineId: clickedMine.id
+                });
+                updateStatus('👷 Robotnik idzie do kopalni 💰');
+            } else if (gameState.selectedUnit) {
+                // Przesuń jednostkę
+                sendCommand('move', {
+                    unitId: gameState.selectedUnit.id,
+                    x,
+                    y
+                });
+                updateStatus(`Wysłano jednostkę do (${Math.floor(x)}, ${Math.floor(y)})`);
+            }
+        });
+
+        function distance(x1, y1, x2, y2) {
+            return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+        }
+
+        // ============================================
+        // RENDERING
+        // ============================================
+        
+        function draw() {
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // Interpolacja (smooth movement)
+            const timeSinceSnapshot = Date.now() - gameState.snapshotTime;
+            gameState.interpolationFactor = Math.min(timeSinceSnapshot / 100, 1); // 100ms interpolation window
+
+            // Rysuj kopalnie
+            gameState.goldMines.forEach(mine => {
+                ctx.fillStyle = '#fbbf24';
+                ctx.beginPath();
+                ctx.arc(mine.x, mine.y, mine.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#92400e';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                ctx.fillStyle = '#92400e';
+                ctx.font = 'bold 20px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('💰', mine.x, mine.y);
+            });
+
+            // Rysuj budynki (bazy)
+            gameState.buildings.forEach(building => {
+                const color = TEAM_COLORS[building.teamId];
+                
+                ctx.fillStyle = color;
+                ctx.fillRect(building.x - building.size/2, building.y - building.size/2, building.size, building.size);
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(building.x - building.size/2, building.y - building.size/2, building.size, building.size);
+
+                // Dach
+                ctx.fillStyle = '#8b4513';
+                ctx.beginPath();
+                ctx.moveTo(building.x, building.y - building.size/2 - 15);
+                ctx.lineTo(building.x - building.size/2 - 10, building.y - building.size/2);
+                ctx.lineTo(building.x + building.size/2 + 10, building.y - building.size/2);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                // HP bar
+                const barWidth = building.size;
+                const barHeight = 6;
+                const hpPercent = building.health / building.maxHealth;
+                
+                ctx.fillStyle = '#333';
+                ctx.fillRect(building.x - barWidth/2, building.y - building.size/2 - 25, barWidth, barHeight);
+                ctx.fillStyle = hpPercent > 0.5 ? '#10b981' : hpPercent > 0.25 ? '#f59e0b' : '#ef4444';
+                ctx.fillRect(building.x - barWidth/2, building.y - building.size/2 - 25, barWidth * hpPercent, barHeight);
+            });
+
+            // Rysuj jednostki z interpolacją
+            gameState.units.forEach(unit => {
+                // Interpolacja pozycji
+                const displayX = unit.prevX + (unit.x - unit.prevX) * gameState.interpolationFactor;
+                const displayY = unit.prevY + (unit.y - unit.prevY) * gameState.interpolationFactor;
+
+                const color = TEAM_COLORS[unit.teamId];
+
+                if (unit.type === 'worker') {
+                    // Worker
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.arc(displayX, displayY, unit.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 16px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('👷', displayX, displayY);
+
+                    if (unit.carryingGold > 0) {
+                        ctx.fillStyle = '#fbbf24';
+                        ctx.font = 'bold 12px Arial';
+                        ctx.fillText(`${unit.carryingGold}💰`, displayX, displayY - 25);
+                    }
+                } else if (unit.type === 'knight') {
+                    // Knight
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.moveTo(displayX, displayY - unit.size);
+                    ctx.lineTo(displayX - unit.size, displayY + unit.size);
+                    ctx.lineTo(displayX + unit.size, displayY + unit.size);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 14px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('⚔️', displayX, displayY);
+
+                    // HP bar
+                    const barWidth = 40;
+                    const barHeight = 4;
+                    const hpPercent = unit.health / unit.maxHealth;
+                    
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(displayX - barWidth/2, displayY - unit.size - 10, barWidth, barHeight);
+                    ctx.fillStyle = hpPercent > 0.5 ? '#10b981' : hpPercent > 0.25 ? '#f59e0b' : '#ef4444';
+                    ctx.fillRect(displayX - barWidth/2, displayY - unit.size - 10, barWidth * hpPercent, barHeight);
+                }
+
+                // Zaznaczenie
+                if (unit.selected && unit.teamId === myTeamId) {
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(displayX, displayY, 25, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            });
+
+            requestAnimationFrame(draw);
+        }
+
+        // Start rendering
+        draw();
+    </script>
+</body>
+
+</html>
+
+
