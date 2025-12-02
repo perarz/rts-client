@@ -2,10 +2,10 @@
 <html lang="pl">
 <head>
     <meta http-equiv="Content-Security-Policy"
-      content="connect-src 'self' wss://rts-server-zt9x.onrender.com;">
+      content="connect-src 'self' ws://localhost:3001 wss://rts-server-zt9x.onrender.com;">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RTS Multiplayer - 4 Graczy</title>
+    <title>RTS Multiplayer v0.7 BETA - 4 Graczy</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         * {
@@ -50,9 +50,25 @@
         .waiting-overlay {
             background: rgba(0, 0, 0, 0.7);
         }
+        .version-badge {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fbbf24;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            z-index: 100;
+            backdrop-filter: blur(5px);
+        }
     </style>
 </head>
 <body class="bg-gray-900">
+    <!-- Version Badge -->
+    <div class="version-badge">v0.7 BETA</div>
+
     <!-- Modal dołączania -->
     <div id="joinModal" class="fixed inset-0 flex items-center justify-center z-50">
         <div class="bg-gray-800 p-8 rounded-lg shadow-2xl max-w-md w-full">
@@ -70,8 +86,8 @@
             <input 
                 type="text" 
                 id="serverUrl" 
-                placeholder="wss://rts-server-zt9x.onrender.com" 
-                value="wss://rts-server-zt9x.onrender.com"
+                placeholder="ws://localhost:3001" 
+                value="ws://localhost:3001"
                 class="w-full px-4 py-3 bg-gray-700 text-white rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
             
@@ -109,19 +125,23 @@
                         💰 <span id="goldDisplay">500</span>
                     </div>
                     <div class="text-sm opacity-75">
-                        👷 <span id="workerCount">1</span> | 
-                        ⚔️ <span id="knightCount">0</span>
+                        👷 <span id="workerCount">1</span>/25 | 
+                        ⚔️ <span id="knightCount">0</span> |
+                        👑 <span id="championCount">0</span>
                     </div>
                 </div>
-                <div class="flex gap-2">
-                    <button id="upgradeWorkers" class="btn-produce bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-semibold text-sm" title="Upgrade: +Speed, +HP, +Capacity">
+                <div class="flex gap-2 flex-wrap">
+                    <button id="upgradeWorkers" class="btn-produce bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded-lg font-semibold text-sm" title="Upgrade: +Speed, +HP, +Capacity">
                         ⚡ Upgrade (?)
                     </button>
-                    <button id="produceWorker" class="btn-produce bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold">
-                        👷 Robotnik (100💰)
+                    <button id="produceWorker" class="btn-produce bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg font-semibold text-sm">
+                        👷 Robotnik (200💰)
                     </button>
-                    <button id="produceKnight" class="btn-produce bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg font-semibold">
-                        ⚔️ Rycerz (200💰)
+                    <button id="produceKnight" class="btn-produce bg-red-600 hover:bg-red-700 px-3 py-2 rounded-lg font-semibold text-sm">
+                        ⚔️ Rycerz (400💰)
+                    </button>
+                    <button id="produceChampion" class="btn-produce bg-yellow-600 hover:bg-yellow-700 px-3 py-2 rounded-lg font-semibold text-sm">
+                        👑 Champion (1500💰)
                     </button>
                 </div>
             </div>
@@ -136,7 +156,7 @@
         <div class="fixed bottom-0 left-0 right-0 ui-panel text-white p-3 z-10">
             <div class="max-w-7xl mx-auto">
                 <div id="statusLog" class="text-sm opacity-90 h-6 overflow-hidden">
-                    Witaj w grze RTS Multiplayer!
+                    Witaj w grze RTS Multiplayer v0.7 BETA!
                 </div>
             </div>
         </div>
@@ -146,11 +166,11 @@
 
     <script>
         // ============================================
-        // MULTIPLAYER CLIENT v2.0
+        // MULTIPLAYER CLIENT v0.7 BETA
         // ============================================
         
-        const CANVAS_WIDTH = 1600;
-        const CANVAS_HEIGHT = 900;
+        const CANVAS_WIDTH = 2000;
+        const CANVAS_HEIGHT = 1200;
         
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
@@ -302,7 +322,6 @@
             
             gameState.gameStarted = snapshot.gameStarted;
 
-            // Show/hide waiting overlay
             if (!gameState.gameStarted) {
                 waitingOverlay.classList.remove('hidden');
                 const playerCount = snapshot.players.length;
@@ -360,7 +379,10 @@
                     break;
                 case 'unit_produced':
                     if (event.teamId === myTeamId) {
-                        updateStatus(`Wyprodukowano ${event.unitType === 'worker' ? 'robotnika 👷' : 'rycerza ⚔️'}`);
+                        const unitName = event.unitType === 'worker' ? 'robotnika 👷' : 
+                                        event.unitType === 'knight' ? 'rycerza ⚔️' : 
+                                        'championa 👑';
+                        updateStatus(`Wyprodukowano ${unitName}`);
                     }
                     break;
                 case 'worker_upgraded':
@@ -372,6 +394,12 @@
                     break;
                 case 'base_destroyed':
                     updateStatus(`💀 Baza gracza ${event.playerName} została zniszczona!`);
+                    break;
+                case 'mine_depleted':
+                    updateStatus(`⛏️ Kopalnia została wyczerpana!`);
+                    break;
+                case 'base_attack':
+                    // Wizualizacja strzału wieży
                     break;
                 case 'unit_died':
                     break;
@@ -409,9 +437,10 @@
             const myUnits = Array.from(gameState.units.values()).filter(u => u.teamId === myTeamId);
             const workers = myUnits.filter(u => u.type === 'worker').length;
             const knights = myUnits.filter(u => u.type === 'knight').length;
+            const champions = myUnits.filter(u => u.type === 'champion').length;
             
             // Update upgrade button
-            const upgradeCost = 400 + (workers * 100);
+            const upgradeCost = 1000 + (workers * 100);
             const upgradeBtn = document.getElementById('upgradeWorkers');
             upgradeBtn.textContent = `⚡ Upgrade (${upgradeCost}💰)`;
             upgradeBtn.disabled = myPlayer.gold < upgradeCost || myPlayer.workerUpgraded;
@@ -422,11 +451,16 @@
                 upgradeBtn.classList.add('bg-green-600');
             }
             
-            document.getElementById('produceWorker').disabled = myPlayer.gold < 100;
-            document.getElementById('produceKnight').disabled = myPlayer.gold < 200;
+            const myBase = gameState.buildings.get(`base-${myClientId}`);
+            const baseAlive = myBase && myBase.health > 0;
+            
+            document.getElementById('produceWorker').disabled = myPlayer.gold < 200 || !baseAlive || workers >= 25;
+            document.getElementById('produceKnight').disabled = myPlayer.gold < 400 || !baseAlive;
+            document.getElementById('produceChampion').disabled = myPlayer.gold < 1500 || !baseAlive;
             
             document.getElementById('workerCount').textContent = workers;
             document.getElementById('knightCount').textContent = knights;
+            document.getElementById('championCount').textContent = champions;
 
             updatePlayersList();
         }
@@ -439,7 +473,7 @@
                 const div = document.createElement('div');
                 div.className = 'flex items-center justify-between';
                 
-                const base = gameState.buildings.get(`base-player-${player.clientId}`);
+                const base = gameState.buildings.get(`base-${player.clientId}`);
                 const isAlive = base && base.health > 0;
                 
                 const upgradeIcon = player.workerUpgraded ? ' ⚡' : '';
@@ -484,6 +518,10 @@
             sendCommand('produce', { unitType: 'knight' });
         });
 
+        document.getElementById('produceChampion').addEventListener('click', () => {
+            sendCommand('produce', { unitType: 'champion' });
+        });
+
         document.getElementById('upgradeWorkers').addEventListener('click', () => {
             sendCommand('upgrade_workers', {});
         });
@@ -506,7 +544,7 @@
 
             let clickedMine = null;
             gameState.goldMines.forEach(mine => {
-                if (distance(mine.x, mine.y, x, y) < mine.size / 2 + 5) {
+                if (!mine.depleted && distance(mine.x, mine.y, x, y) < mine.size / 2 + 5) {
                     clickedMine = mine;
                 }
             });
@@ -517,7 +555,10 @@
                 }
                 gameState.selectedUnit = clickedUnit;
                 clickedUnit.selected = true;
-                updateStatus(`Wybrano ${clickedUnit.type === 'worker' ? 'robotnika 👷' : 'rycerza ⚔️'}`);
+                const unitName = clickedUnit.type === 'worker' ? 'robotnika 👷' : 
+                                 clickedUnit.type === 'knight' ? 'rycerza ⚔️' : 
+                                 'championa 👑';
+                updateStatus(`Wybrano ${unitName}`);
             } else if (clickedMine && gameState.selectedUnit && gameState.selectedUnit.type === 'worker') {
                 sendCommand('mine', {
                     unitId: gameState.selectedUnit.id,
@@ -550,23 +591,65 @@
 
             // Draw mines
             gameState.goldMines.forEach(mine => {
-                ctx.fillStyle = '#fbbf24';
-                ctx.beginPath();
-                ctx.arc(mine.x, mine.y, mine.size / 2, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.strokeStyle = '#92400e';
-                ctx.lineWidth = 3;
-                ctx.stroke();
+                if (mine.depleted) {
+                    // Depleted mine - gray
+                    ctx.fillStyle = '#4b5563';
+                    ctx.beginPath();
+                    ctx.arc(mine.x, mine.y, mine.size / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#1f2937';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
 
-                ctx.fillStyle = '#92400e';
-                ctx.font = 'bold 20px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText('💰', mine.x, mine.y);
+                    ctx.fillStyle = '#1f2937';
+                    ctx.font = 'bold 16px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('❌', mine.x, mine.y);
+                } else {
+                    // Active mine
+                    const percent = mine.remainingGold / mine.totalGold;
+                    const color = percent > 0.5 ? '#fbbf24' : percent > 0.25 ? '#f59e0b' : '#dc2626';
+                    
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.arc(mine.x, mine.y, mine.size / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#92400e';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#92400e';
+                    ctx.font = 'bold 20px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('💰', mine.x, mine.y);
+
+                    // Show remaining gold
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 12px Arial';
+                    ctx.fillText(`${mine.remainingGold}`, mine.x, mine.y + 30);
+                }
             });
 
             // Draw buildings
             gameState.buildings.forEach(building => {
+                if (building.health <= 0) {
+                    // Destroyed base - rubble
+                    ctx.fillStyle = '#4b5563';
+                    ctx.fillRect(building.x - building.size/2, building.y - building.size/2, building.size, building.size);
+                    ctx.strokeStyle = '#1f2937';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(building.x - building.size/2, building.y - building.size/2, building.size, building.size);
+
+                    ctx.fillStyle = '#dc2626';
+                    ctx.font = 'bold 24px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('💀', building.x, building.y);
+                    return;
+                }
+
                 const color = TEAM_COLORS[building.teamId];
                 
                 ctx.fillStyle = color;
@@ -592,6 +675,17 @@
                 ctx.fillRect(building.x - barWidth/2, building.y - building.size/2 - 25, barWidth, barHeight);
                 ctx.fillStyle = hpPercent > 0.5 ? '#10b981' : hpPercent > 0.25 ? '#f59e0b' : '#ef4444';
                 ctx.fillRect(building.x - barWidth/2, building.y - building.size/2 - 25, barWidth * hpPercent, barHeight);
+
+                // Turret range visualization for own base
+                if (building.teamId === myTeamId && building.health > 0) {
+                    ctx.strokeStyle = 'rgba(239, 68, 68, 0.2)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    ctx.beginPath();
+                    ctx.arc(building.x, building.y, 800, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
             });
 
             // Draw units
@@ -610,7 +704,6 @@
                     ctx.lineWidth = 2;
                     ctx.stroke();
 
-                    // Upgraded workers have glow
                     if (unit.upgraded) {
                         ctx.strokeStyle = '#fbbf24';
                         ctx.lineWidth = 3;
@@ -629,7 +722,6 @@
                         ctx.fillText(`${unit.carryingGold}💰`, displayX, displayY - 25);
                     }
 
-                    // HP bar for workers
                     const wBarWidth = 40;
                     const wBarHeight = 3;
                     const wHpPercent = unit.health / unit.maxHealth;
@@ -664,13 +756,42 @@
                     ctx.fillRect(displayX - barWidth/2, displayY - unit.size - 10, barWidth, barHeight);
                     ctx.fillStyle = hpPercent > 0.5 ? '#10b981' : hpPercent > 0.25 ? '#f59e0b' : '#ef4444';
                     ctx.fillRect(displayX - barWidth/2, displayY - unit.size - 10, barWidth * hpPercent, barHeight);
+                } else if (unit.type === 'champion') {
+                    // Champion - larger shield shape
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.moveTo(displayX, displayY - unit.size);
+                    ctx.lineTo(displayX - unit.size, displayY);
+                    ctx.lineTo(displayX - unit.size * 0.7, displayY + unit.size);
+                    ctx.lineTo(displayX + unit.size * 0.7, displayY + unit.size);
+                    ctx.lineTo(displayX + unit.size, displayY);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 18px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('👑', displayX, displayY);
+
+                    const barWidth = 50;
+                    const barHeight = 5;
+                    const hpPercent = unit.health / unit.maxHealth;
+                    
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(displayX - barWidth/2, displayY - unit.size - 12, barWidth, barHeight);
+                    ctx.fillStyle = hpPercent > 0.5 ? '#10b981' : hpPercent > 0.25 ? '#f59e0b' : '#ef4444';
+                    ctx.fillRect(displayX - barWidth/2, displayY - unit.size - 12, barWidth * hpPercent, barHeight);
                 }
 
                 if (unit.selected && unit.teamId === myTeamId) {
                     ctx.strokeStyle = '#fbbf24';
                     ctx.lineWidth = 3;
                     ctx.beginPath();
-                    ctx.arc(displayX, displayY, 25, 0, Math.PI * 2);
+                    ctx.arc(displayX, displayY, unit.size + 10, 0, Math.PI * 2);
                     ctx.stroke();
                 }
             });
