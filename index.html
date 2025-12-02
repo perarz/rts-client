@@ -67,7 +67,7 @@
 </head>
 <body class="bg-gray-900">
     <!-- Version Badge -->
-    <div class="version-badge">v0.7 BETA</div>
+    <div class="version-badge">v0.8 BETA</div>
 
     <!-- Modal dołączania -->
     <div id="joinModal" class="fixed inset-0 flex items-center justify-center z-50">
@@ -84,12 +84,16 @@
             >
             
             <input 
-                type="text" 
-                id="serverUrl" 
-                placeholder="ws://localhost:3001" 
-                value="ws://localhost:3001"
-                class="w-full px-4 py-3 bg-gray-700 text-white rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
+        list="servers"
+        id="serverUrl"
+        placeholder="Wybierz serwer"
+        class="w-full px-4 py-3 bg-gray-700 text-white rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+
+        <datalist id="servers">
+            <option value="ws://localhost:3001"></option>
+            <option value="wss://rts-server-zt9x.onrender.com"></option>
+        </datalist>
             
             <button 
                 id="joinButton" 
