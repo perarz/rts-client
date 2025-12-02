@@ -678,11 +678,11 @@
 
                 // Turret range visualization for own base
                 if (building.teamId === myTeamId && building.health > 0) {
-                    ctx.strokeStyle = 'rgba(239, 68, 68, 0.2)';
-                    ctx.lineWidth = 4;
+                    ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
+                    ctx.lineWidth = 6;
                     ctx.setLineDash([5, 5]);
                     ctx.beginPath();
-                    ctx.arc(building.x, building.y, 800, 0, Math.PI * 2);
+                    ctx.arc(building.x, building.y, 200, 0, Math.PI * 2);
                     ctx.stroke();
                     ctx.setLineDash([]);
                 }
