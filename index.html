@@ -5,7 +5,7 @@
       content="connect-src 'self' ws://localhost:3001 wss://rts-server-zt9x.onrender.com;">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RTS Multiplayer v0.7 BETA - 4 Graczy</title>
+    <title>RTS Multiplayer v0.8 BETA - 4 Graczy</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         * {
@@ -84,16 +84,12 @@
             >
             
             <input 
-        list="servers"
-        id="serverUrl"
-        placeholder="Wybierz serwer"
-        class="w-full px-4 py-3 bg-gray-700 text-white rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-
-        <datalist id="servers">
-            <option value="ws://localhost:3001"></option>
-            <option value="wss://rts-server-zt9x.onrender.com"></option>
-        </datalist>
+                type="text" 
+                id="serverUrl" 
+                placeholder="ws://localhost:3001" 
+                value="ws://localhost:3001"
+                class="w-full px-4 py-3 bg-gray-700 text-white rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
             
             <button 
                 id="joinButton" 
@@ -135,6 +131,12 @@
                     </div>
                 </div>
                 <div class="flex gap-2 flex-wrap">
+                    <button id="deselectAll" class="btn-produce bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded-lg font-semibold text-sm">
+                        ❌ Odznacz
+                    </button>
+                    <button id="upgradeBase" class="btn-produce bg-indigo-600 hover:bg-indigo-700 px-3 py-2 rounded-lg font-semibold text-sm" title="Upgrade: +HP, +DMG, +Range, +Passive Income">
+                        🏰 Upgrade Bazy (1000💰)
+                    </button>
                     <button id="upgradeWorkers" class="btn-produce bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded-lg font-semibold text-sm" title="Upgrade: +Speed, +HP, +Capacity">
                         ⚡ Upgrade (?)
                     </button>
@@ -173,7 +175,7 @@
         // MULTIPLAYER CLIENT v0.7 BETA
         // ============================================
         
-        const CANVAS_WIDTH = 2300;
+        const CANVAS_WIDTH = 2000;
         const CANVAS_HEIGHT = 1200;
         
         const canvas = document.getElementById('gameCanvas');
@@ -194,8 +196,15 @@
             buildings: new Map(),
             players: new Map(),
             goldMines: [],
-            selectedUnit: null,
+            selectedUnits: new Set(), // Changed from selectedUnit to selectedUnits
             gameStarted: false,
+            
+            // Box selection
+            isBoxSelecting: false,
+            boxStartX: 0,
+            boxStartY: 0,
+            boxEndX: 0,
+            boxEndY: 0,
             
             prevSnapshot: null,
             nextSnapshot: null,
@@ -396,6 +405,13 @@
                         updateStatus(`⚡ ${event.playerName} ulepszył robotników`);
                     }
                     break;
+                case 'base_upgraded':
+                    if (event.teamId === myTeamId) {
+                        updateStatus(`🏰 Baza została ulepszona!`);
+                    } else {
+                        updateStatus(`🏰 ${event.playerName} ulepszył bazę`);
+                    }
+                    break;
                 case 'base_destroyed':
                     updateStatus(`💀 Baza gracza ${event.playerName} została zniszczona!`);
                     break;
@@ -443,7 +459,7 @@
             const knights = myUnits.filter(u => u.type === 'knight').length;
             const champions = myUnits.filter(u => u.type === 'champion').length;
             
-            // Update upgrade button
+            // Update upgrade workers button
             const upgradeCost = 1000 + (workers * 100);
             const upgradeBtn = document.getElementById('upgradeWorkers');
             upgradeBtn.textContent = `⚡ Upgrade (${upgradeCost}💰)`;
@@ -457,10 +473,24 @@
             
             const myBase = gameState.buildings.get(`base-${myClientId}`);
             const baseAlive = myBase && myBase.health > 0;
+            const baseUpgraded = myBase && myBase.upgraded;
+            
+            // Update base upgrade button
+            const baseUpgradeBtn = document.getElementById('upgradeBase');
+            baseUpgradeBtn.disabled = myPlayer.gold < 1000 || !baseAlive || baseUpgraded;
+            
+            if (baseUpgraded) {
+                baseUpgradeBtn.textContent = '🏰 Upgraded ✓';
+                baseUpgradeBtn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+                baseUpgradeBtn.classList.add('bg-green-600');
+            }
             
             document.getElementById('produceWorker').disabled = myPlayer.gold < 200 || !baseAlive || workers >= 25;
             document.getElementById('produceKnight').disabled = myPlayer.gold < 400 || !baseAlive;
             document.getElementById('produceChampion').disabled = myPlayer.gold < 1500 || !baseAlive;
+            
+            // Update deselect button
+            document.getElementById('deselectAll').disabled = gameState.selectedUnits.size === 0;
             
             document.getElementById('workerCount').textContent = workers;
             document.getElementById('knightCount').textContent = knights;
@@ -530,15 +560,95 @@
             sendCommand('upgrade_workers', {});
         });
 
+        document.getElementById('upgradeBase').addEventListener('click', () => {
+            sendCommand('upgrade_base', {});
+        });
+
+        document.getElementById('deselectAll').addEventListener('click', () => {
+            gameState.selectedUnits.forEach(unit => {
+                unit.selected = false;
+            });
+            gameState.selectedUnits.clear();
+            updateStatus('Odznaczono wszystkie jednostki');
+        });
+
         // ============================================
-        // CANVAS INTERACTIONS
+        // CANVAS INTERACTIONS - BOX SELECTION
         // ============================================
         
-        canvas.addEventListener('click', (e) => {
+        canvas.addEventListener('mousedown', (e) => {
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
+            // Start box selection
+            gameState.isBoxSelecting = true;
+            gameState.boxStartX = x;
+            gameState.boxStartY = y;
+            gameState.boxEndX = x;
+            gameState.boxEndY = y;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!gameState.isBoxSelecting) return;
+
+            const rect = canvas.getBoundingClientRect();
+            gameState.boxEndX = e.clientX - rect.left;
+            gameState.boxEndY = e.clientY - rect.top;
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (!gameState.isBoxSelecting) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+
+            gameState.isBoxSelecting = false;
+
+            const minX = Math.min(gameState.boxStartX, endX);
+            const maxX = Math.max(gameState.boxStartX, endX);
+            const minY = Math.min(gameState.boxStartY, endY);
+            const maxY = Math.max(gameState.boxStartY, endY);
+
+            const boxWidth = maxX - minX;
+            const boxHeight = maxY - minY;
+
+            // If box is very small (< 10px), treat as click
+            if (boxWidth < 10 && boxHeight < 10) {
+                handleClick(gameState.boxStartX, gameState.boxStartY);
+                return;
+            }
+
+            // Box selection - select all units in box
+            const unitsInBox = [];
+            gameState.units.forEach(unit => {
+                if (unit.teamId === myTeamId && 
+                    unit.x >= minX && unit.x <= maxX &&
+                    unit.y >= minY && unit.y <= maxY) {
+                    unitsInBox.push(unit);
+                }
+            });
+
+            if (unitsInBox.length > 0) {
+                // Deselect old units
+                gameState.selectedUnits.forEach(unit => {
+                    unit.selected = false;
+                });
+                gameState.selectedUnits.clear();
+
+                // Select new units
+                unitsInBox.forEach(unit => {
+                    unit.selected = true;
+                    gameState.selectedUnits.add(unit);
+                });
+
+                updateStatus(`Zaznaczono ${unitsInBox.length} jednostek`);
+            }
+        });
+
+        function handleClick(x, y) {
+            // Check if clicked on unit
             let clickedUnit = null;
             gameState.units.forEach(unit => {
                 if (unit.teamId === myTeamId && distance(unit.x, unit.y, x, y) < unit.size + 5) {
@@ -546,6 +656,7 @@
                 }
             });
 
+            // Check if clicked on mine
             let clickedMine = null;
             gameState.goldMines.forEach(mine => {
                 if (!mine.depleted && distance(mine.x, mine.y, x, y) < mine.size / 2 + 5) {
@@ -554,30 +665,47 @@
             });
 
             if (clickedUnit) {
-                if (gameState.selectedUnit) {
-                    gameState.selectedUnit.selected = false;
-                }
-                gameState.selectedUnit = clickedUnit;
+                // Single click on unit - select only this unit
+                gameState.selectedUnits.forEach(unit => {
+                    unit.selected = false;
+                });
+                gameState.selectedUnits.clear();
+
                 clickedUnit.selected = true;
+                gameState.selectedUnits.add(clickedUnit);
+
                 const unitName = clickedUnit.type === 'worker' ? 'robotnika 👷' : 
                                  clickedUnit.type === 'knight' ? 'rycerza ⚔️' : 
                                  'championa 👑';
                 updateStatus(`Wybrano ${unitName}`);
-            } else if (clickedMine && gameState.selectedUnit && gameState.selectedUnit.type === 'worker') {
-                sendCommand('mine', {
-                    unitId: gameState.selectedUnit.id,
-                    mineId: clickedMine.id
+            } else if (clickedMine && gameState.selectedUnits.size > 0) {
+                // Check if all selected units are workers
+                const allWorkers = Array.from(gameState.selectedUnits).every(u => u.type === 'worker');
+                
+                if (allWorkers) {
+                    // Send all workers to mine
+                    gameState.selectedUnits.forEach(unit => {
+                        sendCommand('mine', {
+                            unitId: unit.id,
+                            mineId: clickedMine.id
+                        });
+                    });
+                    updateStatus(`Wysłano ${gameState.selectedUnits.size} robotników do kopalni 💰`);
+                } else {
+                    updateStatus('⚠️ Tylko robotnicy mogą kopać!');
+                }
+            } else if (gameState.selectedUnits.size > 0) {
+                // Move selected units
+                gameState.selectedUnits.forEach(unit => {
+                    sendCommand('move', {
+                        unitId: unit.id,
+                        x,
+                        y
+                    });
                 });
-                updateStatus('👷 Robotnik idzie do kopalni 💰');
-            } else if (gameState.selectedUnit) {
-                sendCommand('move', {
-                    unitId: gameState.selectedUnit.id,
-                    x,
-                    y
-                });
-                updateStatus(`Wysłano jednostkę do (${Math.floor(x)}, ${Math.floor(y)})`);
+                updateStatus(`Wysłano ${gameState.selectedUnits.size} jednostek do (${Math.floor(x)}, ${Math.floor(y)})`);
             }
-        });
+        }
 
         function distance(x1, y1, x2, y2) {
             return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
@@ -656,13 +784,17 @@
 
                 const color = TEAM_COLORS[building.teamId];
                 
-                ctx.fillStyle = color;
+                // Base color - darker if upgraded
+                const baseColor = building.upgraded ? '#1e3a8a' : color;
+                
+                ctx.fillStyle = baseColor;
                 ctx.fillRect(building.x - building.size/2, building.y - building.size/2, building.size, building.size);
-                ctx.strokeStyle = '#000';
-                ctx.lineWidth = 3;
+                ctx.strokeStyle = building.upgraded ? '#fbbf24' : '#000';
+                ctx.lineWidth = building.upgraded ? 4 : 3;
                 ctx.strokeRect(building.x - building.size/2, building.y - building.size/2, building.size, building.size);
 
-                ctx.fillStyle = '#8b4513';
+                // Roof
+                ctx.fillStyle = building.upgraded ? '#92400e' : '#8b4513';
                 ctx.beginPath();
                 ctx.moveTo(building.x, building.y - building.size/2 - 15);
                 ctx.lineTo(building.x - building.size/2 - 10, building.y - building.size/2);
@@ -670,6 +802,15 @@
                 ctx.closePath();
                 ctx.fill();
                 ctx.stroke();
+
+                // Upgraded icon
+                if (building.upgraded) {
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.font = 'bold 20px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('🏰', building.x, building.y);
+                }
 
                 const barWidth = building.size;
                 const barHeight = 6;
@@ -682,11 +823,12 @@
 
                 // Turret range visualization for own base
                 if (building.teamId === myTeamId && building.health > 0) {
-                    ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
-                    ctx.lineWidth = 6;
+                    const range = building.upgraded ? 1200 : 800;
+                    ctx.strokeStyle = building.upgraded ? 'rgba(251, 191, 36, 0.3)' : 'rgba(239, 68, 68, 0.3)';
+                    ctx.lineWidth = 2;
                     ctx.setLineDash([5, 5]);
                     ctx.beginPath();
-                    ctx.arc(building.x, building.y, 200, 0, Math.PI * 2);
+                    ctx.arc(building.x, building.y, range, 0, Math.PI * 2);
                     ctx.stroke();
                     ctx.setLineDash([]);
                 }
@@ -791,14 +933,33 @@
                     ctx.fillRect(displayX - barWidth/2, displayY - unit.size - 12, barWidth * hpPercent, barHeight);
                 }
 
+                // RED highlight for selected units
                 if (unit.selected && unit.teamId === myTeamId) {
-                    ctx.strokeStyle = '#fbbf24';
-                    ctx.lineWidth = 3;
+                    ctx.strokeStyle = '#ef4444'; // RED
+                    ctx.lineWidth = 4;
                     ctx.beginPath();
                     ctx.arc(displayX, displayY, unit.size + 10, 0, Math.PI * 2);
                     ctx.stroke();
                 }
             });
+
+            // Draw box selection rectangle (YELLOW)
+            if (gameState.isBoxSelecting) {
+                const minX = Math.min(gameState.boxStartX, gameState.boxEndX);
+                const minY = Math.min(gameState.boxStartY, gameState.boxEndY);
+                const width = Math.abs(gameState.boxEndX - gameState.boxStartX);
+                const height = Math.abs(gameState.boxEndY - gameState.boxStartY);
+
+                ctx.strokeStyle = '#fbbf24'; // YELLOW
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(minX, minY, width, height);
+                ctx.setLineDash([]);
+
+                // Fill with transparent yellow
+                ctx.fillStyle = 'rgba(251, 191, 36, 0.1)';
+                ctx.fillRect(minX, minY, width, height);
+            }
 
             requestAnimationFrame(draw);
         }
