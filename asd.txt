@@ -1,37 +1,17 @@
-1 tak zastosuj
+Zmodyfikuj kod gry zgodnie z moimi poleceniami:
+DUZA ZMIANA
+zamiast zaznaczania jednego rycerza/robotnika/championa naraz zrob by mozna bylo przytrzymaniem tak jakby zaznaczyc kilka jednostek 
+jesli w zaznaczonym kwadracie bedzie np rycerz i robotnik to nie jest mozliwe wyslanie ich do kopalni tylko poruszanie natomiast gdy jest np 2 robotnikow to mozna
+mimo dodania tej funkcji wciąż można kliknąć i zaznaczyć tylko jedną jednostke
+zrob tak by gdy zaznaczysz jednostke/ki to ciagle sie ona podswietla oraz dodaj mozliwosc odznaczenia
 
-2 nazwa obojetne
+dodaj funkcje bazy dzieki ktorej druzyna co 30 sekund otrzymuje 50 złota
+oraz dodaj upgrade bazy który zwiększa jej hp range, damage,ilosc zlota co 30 sekund
+ oraz wyglad na bardziej zamek cena tego upgrade to 1000 złota 
 
-cena 1500
+dodaj tak że gdy zacznie sie rozgrywka i ktos dolaczy a pozniej wyjdzie to baza jakby zostaje zniszczona tak jakby miala 0hp 
+i miejsce robi sie dopiero przy resecie gry
 
-tak zeby staty mial adekwatne do ceny dosyc mocne
+zmien system walki poniewaz obecnie jest troche popsuty oraz gdy dwie jednostki sa w ruchu ale blisko siebie to i tak siebie nie biją
 
-wizualnie sam wymysl
-
-3 ma zostac tak jak teraz wszystko lewym przyciskiem tylko jest pobugowane ze np kto stoi w miejscu to zazwyczaj zadaje pierwszego hita wiec jakos to pozmieniaj ustawienia cooldown albo range
-
-4 moze byc 2000x1200
-
-5zasieg tak obszar bazy 800px testowo(napewno tak zeby nie dosiegal do bazy przeciwnika)
-
-6dmg tak zeby zabijal rycerza na 4 hity
-
-atack speed wolny tak 2s na strzal
-
-tylko rycerzy 
-
-te blizej 700 
-
-dalej 2k
-
-w centralnej 10k
-
-zostaje puste
-
-pokazywac
-
-ilosc zloz taka jak teraz
-
-8 1500
-
-9 tak
+jesli robotnik ma złoto i gracz np sie nim ruszy a pozniej wejdzie do bazy to i tak nie odlozy zlota i musi jakby znow wejsc do kopalni i wrocic sam i odlozyc wiec napraw to
