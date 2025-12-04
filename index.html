@@ -162,7 +162,7 @@
         <div class="fixed bottom-0 left-0 right-0 ui-panel text-white p-3 z-10">
             <div class="max-w-7xl mx-auto">
                 <div id="statusLog" class="text-sm opacity-90 h-6 overflow-hidden">
-                    Witaj w grze RTS Multiplayer v0.7 BETA!
+                    Witaj w grze RTS Multiplayer v0.8 BETA!
                 </div>
             </div>
         </div>
@@ -171,10 +171,6 @@
     <canvas id="gameCanvas"></canvas>
 
     <script>
-        // ============================================
-        // MULTIPLAYER CLIENT v0.7 BETA
-        // ============================================
-        
         const CANVAS_WIDTH = 2000;
         const CANVAS_HEIGHT = 1200;
         
@@ -196,10 +192,9 @@
             buildings: new Map(),
             players: new Map(),
             goldMines: [],
-            selectedUnits: new Set(), // Changed from selectedUnit to selectedUnits
+            selectedUnits: new Set(),
             gameStarted: false,
             
-            // Box selection
             isBoxSelecting: false,
             boxStartX: 0,
             boxStartY: 0,
@@ -220,10 +215,6 @@
         const gameUI = document.getElementById('gameUI');
         const waitingOverlay = document.getElementById('waitingOverlay');
 
-        // ============================================
-        // WEBSOCKET CONNECTION
-        // ============================================
-        
         function connect() {
             const serverUrl = serverUrlInput.value.trim();
             const playerName = playerNameInput.value.trim() || undefined;
@@ -275,10 +266,6 @@
             if (e.key === 'Enter') connect();
         });
 
-        // ============================================
-        // SERVER MESSAGE HANDLER
-        // ============================================
-        
         function handleServerMessage(message) {
             switch (message.type) {
                 case 'joined':
@@ -323,10 +310,6 @@
             }
         }
 
-        // ============================================
-        // SNAPSHOT HANDLING & INTERPOLATION
-        // ============================================
-        
         function handleSnapshot(snapshot) {
             gameState.prevSnapshot = gameState.nextSnapshot;
             gameState.nextSnapshot = snapshot;
@@ -418,11 +401,6 @@
                 case 'mine_depleted':
                     updateStatus(`⛏️ Kopalnia została wyczerpana!`);
                     break;
-                case 'base_attack':
-                    // Wizualizacja strzału wieży
-                    break;
-                case 'unit_died':
-                    break;
             }
         }
 
@@ -444,10 +422,6 @@
             }, 5000);
         }
 
-        // ============================================
-        // UI UPDATES
-        // ============================================
-        
         function updateUI() {
             const myPlayer = gameState.players.get(myClientId);
             if (!myPlayer) return;
@@ -459,7 +433,6 @@
             const knights = myUnits.filter(u => u.type === 'knight').length;
             const champions = myUnits.filter(u => u.type === 'champion').length;
             
-            // Update upgrade workers button
             const upgradeCost = 1000 + (workers * 100);
             const upgradeBtn = document.getElementById('upgradeWorkers');
             upgradeBtn.textContent = `⚡ Upgrade (${upgradeCost}💰)`;
@@ -475,7 +448,6 @@
             const baseAlive = myBase && myBase.health > 0;
             const baseUpgraded = myBase && myBase.upgraded;
             
-            // Update base upgrade button
             const baseUpgradeBtn = document.getElementById('upgradeBase');
             baseUpgradeBtn.disabled = myPlayer.gold < 1000 || !baseAlive || baseUpgraded;
             
@@ -489,7 +461,6 @@
             document.getElementById('produceKnight').disabled = myPlayer.gold < 400 || !baseAlive;
             document.getElementById('produceChampion').disabled = myPlayer.gold < 1500 || !baseAlive;
             
-            // Update deselect button
             document.getElementById('deselectAll').disabled = gameState.selectedUnits.size === 0;
             
             document.getElementById('workerCount').textContent = workers;
@@ -530,10 +501,6 @@
             document.getElementById('statusLog').textContent = message;
         }
 
-        // ============================================
-        // COMMAND SENDING
-        // ============================================
-        
         function sendCommand(command, payload) {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({
@@ -572,16 +539,11 @@
             updateStatus('Odznaczono wszystkie jednostki');
         });
 
-        // ============================================
-        // CANVAS INTERACTIONS - BOX SELECTION
-        // ============================================
-        
         canvas.addEventListener('mousedown', (e) => {
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // Start box selection
             gameState.isBoxSelecting = true;
             gameState.boxStartX = x;
             gameState.boxStartY = y;
@@ -614,13 +576,11 @@
             const boxWidth = maxX - minX;
             const boxHeight = maxY - minY;
 
-            // If box is very small (< 10px), treat as click
             if (boxWidth < 10 && boxHeight < 10) {
                 handleClick(gameState.boxStartX, gameState.boxStartY);
                 return;
             }
 
-            // Box selection - select all units in box
             const unitsInBox = [];
             gameState.units.forEach(unit => {
                 if (unit.teamId === myTeamId && 
@@ -631,13 +591,11 @@
             });
 
             if (unitsInBox.length > 0) {
-                // Deselect old units
                 gameState.selectedUnits.forEach(unit => {
                     unit.selected = false;
                 });
                 gameState.selectedUnits.clear();
 
-                // Select new units
                 unitsInBox.forEach(unit => {
                     unit.selected = true;
                     gameState.selectedUnits.add(unit);
@@ -648,7 +606,6 @@
         });
 
         function handleClick(x, y) {
-            // Check if clicked on unit
             let clickedUnit = null;
             gameState.units.forEach(unit => {
                 if (unit.teamId === myTeamId && distance(unit.x, unit.y, x, y) < unit.size + 5) {
@@ -656,7 +613,6 @@
                 }
             });
 
-            // Check if clicked on mine
             let clickedMine = null;
             gameState.goldMines.forEach(mine => {
                 if (!mine.depleted && distance(mine.x, mine.y, x, y) < mine.size / 2 + 5) {
@@ -665,7 +621,6 @@
             });
 
             if (clickedUnit) {
-                // Single click on unit - select only this unit
                 gameState.selectedUnits.forEach(unit => {
                     unit.selected = false;
                 });
@@ -679,11 +634,9 @@
                                  'championa 👑';
                 updateStatus(`Wybrano ${unitName}`);
             } else if (clickedMine && gameState.selectedUnits.size > 0) {
-                // Check if all selected units are workers
                 const allWorkers = Array.from(gameState.selectedUnits).every(u => u.type === 'worker');
                 
                 if (allWorkers) {
-                    // Send all workers to mine
                     gameState.selectedUnits.forEach(unit => {
                         sendCommand('mine', {
                             unitId: unit.id,
@@ -695,7 +648,6 @@
                     updateStatus('⚠️ Tylko robotnicy mogą kopać!');
                 }
             } else if (gameState.selectedUnits.size > 0) {
-                // Move selected units
                 gameState.selectedUnits.forEach(unit => {
                     sendCommand('move', {
                         unitId: unit.id,
@@ -711,20 +663,14 @@
             return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
         }
 
-        // ============================================
-        // RENDERING
-        // ============================================
-        
         function draw() {
             ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
             const timeSinceSnapshot = Date.now() - gameState.snapshotTime;
             gameState.interpolationFactor = Math.min(timeSinceSnapshot / 100, 1);
 
-            // Draw mines
             gameState.goldMines.forEach(mine => {
                 if (mine.depleted) {
-                    // Depleted mine - gray
                     ctx.fillStyle = '#4b5563';
                     ctx.beginPath();
                     ctx.arc(mine.x, mine.y, mine.size / 2, 0, Math.PI * 2);
@@ -739,7 +685,6 @@
                     ctx.textBaseline = 'middle';
                     ctx.fillText('❌', mine.x, mine.y);
                 } else {
-                    // Active mine
                     const percent = mine.remainingGold / mine.totalGold;
                     const color = percent > 0.5 ? '#fbbf24' : percent > 0.25 ? '#f59e0b' : '#dc2626';
                     
@@ -757,17 +702,14 @@
                     ctx.textBaseline = 'middle';
                     ctx.fillText('💰', mine.x, mine.y);
 
-                    // Show remaining gold
                     ctx.fillStyle = '#fff';
                     ctx.font = 'bold 12px Arial';
                     ctx.fillText(`${mine.remainingGold}`, mine.x, mine.y + 30);
                 }
             });
 
-            // Draw buildings
             gameState.buildings.forEach(building => {
                 if (building.health <= 0) {
-                    // Destroyed base - rubble
                     ctx.fillStyle = '#4b5563';
                     ctx.fillRect(building.x - building.size/2, building.y - building.size/2, building.size, building.size);
                     ctx.strokeStyle = '#1f2937';
